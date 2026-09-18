@@ -2,31 +2,20 @@ import { NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { verifyCronRequest } from "@/lib/cron-auth";
 import { sendWeeklyHrReport } from "@/lib/resend";
-import {
-  isAtOrAfterLondonTime,
-  londonDateString,
-  londonDayOfWeek,
-  londonStartOfDayUtcIso,
-  formatLondon,
-} from "@/lib/time";
+import { londonDateString, londonStartOfDayUtcIso, formatLondon } from "@/lib/time";
 
 const RUN_TYPE = "weekly-hr-report";
-const TARGET_HOUR = 17;
-const TARGET_MINUTE = 30;
-const FRIDAY = 5;
 
-// Fires every Friday afternoon (see vercel.json). Summarises the Mon-Fri just gone
-// for every active office staff member. Calendar (holiday/WFH) cross-checking is
-// not wired up yet -- the email notes that explicitly so HR knows to verify manually.
+// Vercel Cron fires this once, every Friday at 17:30 UTC (see vercel.json --
+// Vercel's Hobby plan only allows one run/day, so this is a fixed UTC time
+// rather than a BST-adjusted one). Summarises the Mon-Fri just gone for every
+// active office staff member. Calendar (holiday/WFH) cross-checking is not
+// wired up yet -- the email notes that explicitly so HR knows to verify manually.
 export async function GET(request: Request) {
   const authError = verifyCronRequest(request);
   if (authError) return authError;
 
   const now = new Date();
-  if (londonDayOfWeek(now) !== FRIDAY || !isAtOrAfterLondonTime(now, TARGET_HOUR, TARGET_MINUTE)) {
-    return NextResponse.json({ skipped: "not yet Friday 17:30 London time" });
-  }
-
   const supabase = createAdminSupabase();
   const runDate = londonDateString(now);
 
