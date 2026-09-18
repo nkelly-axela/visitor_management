@@ -1,53 +1,41 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/require-admin";
+import { verifyCronRequest } from "@/lib/cron-auth";
+import { sendStaffNotSignedOutAlert } from "@/lib/resend";
+import { londonDateString, londonStartOfDayUtcIso } from "@/lib/time";
 
-// GET /api/staff            -> full directory, admin only
-// GET /api/staff?active=1   -> public: id/name/department only, for the kiosk autofill list
+const RUN_TYPE = "staff-not-signed-out";
+
+// Vercel Cron fires this once a day at 17:15 UTC -- i.e. 5:15pm GMT exactly, as
+// specified (this does not shift for British Summer Time; Vercel's Hobby plan
+// only allows one run/day, so a fixed UTC time is what the plan can support).
+// notification_runs still guards against a duplicate send if this is ever
+// triggered manually more than once on the same day.
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const activeOnly = url.searchParams.get("active") === "1";
+  const authError = verifyCronRequest(request);
+  if (authError) return authError;
 
+  const now = new Date();
   const supabase = createAdminSupabase();
+  const runDate = londonDateString(now);
 
-  if (activeOnly) {
-    const { data, error } = await supabase
-      .from("office_staff")
-      .select("id, name, department")
-      .eq("active", true)
-      .order("name");
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ staff: data });
+  const { error: claimError } = await supabase
+    .from("notification_runs")
+    .insert({ run_type: RUN_TYPE, run_date: runDate });
+  if (claimError) {
+    // Unique constraint violation means another invocation already ran today.
+    return NextResponse.json({ skipped: "already sent today" });
   }
 
-  const guard = await requireAdmin();
-  if ("error" in guard) return guard.error;
-
-  const { data, error } = await supabase.from("office_staff").select("*").order("name");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ staff: data });
-}
-
-export async function POST(request: Request) {
-  const guard = await requireAdmin();
-  if ("error" in guard) return guard.error;
-
-  const body = await request.json();
-  const name = String(body.name ?? "").trim();
-  const email = String(body.email ?? "").trim().toLowerCase();
-  const department = body.department ? String(body.department).trim() : null;
-
-  if (!name || !email) {
-    return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
-  }
-
-  const supabase = createAdminSupabase();
-  const { data, error } = await supabase
-    .from("office_staff")
-    .insert({ name, email, department, active: true })
-    .select()
-    .single();
+  const { data: openStaffVisits, error } = await supabase
+    .from("visit_logs")
+    .select("*")
+    .eq("visitor_type", "staff")
+    .is("signed_out_at", null)
+    .gte("signed_in_at", londonStartOfDayUtcIso(runDate));
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ staff: data }, { status: 201 });
+
+  const result = await sendStaffNotSignedOutAlert(openStaffVisits ?? []);
+  return NextResponse.json({ sent: true, count: openStaffVisits?.length ?? 0, result });
 }
