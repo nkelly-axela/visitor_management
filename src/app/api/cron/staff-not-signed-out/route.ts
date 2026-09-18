@@ -2,24 +2,20 @@ import { NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/server";
 import { verifyCronRequest } from "@/lib/cron-auth";
 import { sendStaffNotSignedOutAlert } from "@/lib/resend";
-import { isAtOrAfterLondonTime, londonDateString, londonStartOfDayUtcIso } from "@/lib/time";
+import { londonDateString, londonStartOfDayUtcIso } from "@/lib/time";
 
 const RUN_TYPE = "staff-not-signed-out";
-const TARGET_HOUR = 17;
-const TARGET_MINUTE = 15;
 
-// Vercel Cron hits this twice a day (once for GMT, once for BST -- see vercel.json)
-// at :15 past the hour. We only actually act once London local time has reached
-// 17:15, and only once per day, using notification_runs as a dedupe ledger.
+// Vercel Cron fires this once a day at 17:15 UTC -- i.e. 5:15pm GMT exactly, as
+// specified (this does not shift for British Summer Time; Vercel's Hobby plan
+// only allows one run/day, so a fixed UTC time is what the plan can support).
+// notification_runs still guards against a duplicate send if this is ever
+// triggered manually more than once on the same day.
 export async function GET(request: Request) {
   const authError = verifyCronRequest(request);
   if (authError) return authError;
 
   const now = new Date();
-  if (!isAtOrAfterLondonTime(now, TARGET_HOUR, TARGET_MINUTE)) {
-    return NextResponse.json({ skipped: "not yet 17:15 London time" });
-  }
-
   const supabase = createAdminSupabase();
   const runDate = londonDateString(now);
 
