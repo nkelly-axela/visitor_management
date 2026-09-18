@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/staff-not-signed-out",
+      "schedule": "15 16,17 * * 1-5"
+    },
+    {
+      "path": "/api/cron/weekly-hr-report",
+      "schedule": "30 16,17 * * 5"
+    }
+  ]
+}
