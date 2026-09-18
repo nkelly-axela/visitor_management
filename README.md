@@ -11,12 +11,21 @@ admin panel for managing staff, auditing visits, and exporting data.
   the office staff directory, view/audit all sign-in data, export CSV.
 
 Notifications (via [Resend](https://resend.com)):
-- Weekday ~17:15 Europe/London: alert if any staff signed in but haven't
-  signed out.
-- Friday ~17:30 Europe/London: weekly staff attendance summary to HR.
+- Weekdays at 17:15 **GMT** (fixed UTC+0, not adjusted for British Summer
+  Time — see note below): alert if any staff signed in but haven't signed out.
+- Fridays at 17:30 GMT: weekly staff attendance summary to HR.
   (Company-calendar cross-checking against holiday/WFH is **not** wired up
   yet — the email says so explicitly. That's a follow-up once you confirm
   which calendar system to integrate.)
+
+> **Why fixed GMT and not "5:15pm UK time"?** Vercel's free Hobby plan only
+> allows cron jobs to run once per day, which rules out the two-fires-a-day
+> trick needed to track the GMT/BST clock change automatically. A fixed
+> 17:15 UTC satisfies "5:15 GMT" literally and works year-round on Hobby. If
+> you want it to track UK local time through BST instead (so it's always
+> 5:15pm on the wall clock), either upgrade to Vercel Pro and reintroduce a
+> twice-daily schedule, or trigger these same routes from an external
+> scheduler (e.g. a free GitHub Actions cron) instead of `vercel.json`.
 
 Stack: Next.js 14 (App Router) + TypeScript + Tailwind, Supabase (Postgres +
 Auth), Resend, deployed on Vercel (Vercel Cron for the scheduled emails).
@@ -76,11 +85,9 @@ production:
 2. In [vercel.com](https://vercel.com), **Add New Project** → import the
    GitHub repo → add the environment variables above → Deploy.
 3. Vercel automatically picks up the cron jobs defined in `vercel.json`:
-   - `POST/GET /api/cron/staff-not-signed-out` — weekdays at :15 past 16:00
-     and 17:00 UTC (covers both GMT and BST so it always fires at 17:15
-     London time; the route checks the actual local time before sending).
-   - `/api/cron/weekly-hr-report` — Fridays at :30 past 16:00 and 17:00 UTC
-     (17:30 London time).
+   - `/api/cron/staff-not-signed-out` — weekdays at 17:15 UTC (once/day, to
+     stay within the Hobby plan's cron limits — see the note above).
+   - `/api/cron/weekly-hr-report` — Fridays at 17:30 UTC.
    - Vercel sends `Authorization: Bearer <CRON_SECRET>` automatically to
      these routes when `CRON_SECRET` is set as an env var — no extra config
      needed.
@@ -111,9 +118,10 @@ Then open http://localhost:3000. Cron routes can be tested manually with:
 curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/staff-not-signed-out
 ```
 
-(Note: the cron routes no-op outside their target time window unless you
-temporarily adjust `TARGET_HOUR`/`TARGET_MINUTE` in the route files, or
-delete the relevant `notification_runs` row to re-trigger a same-day send.)
+(Note: the cron routes run immediately whenever hit — timing is entirely
+down to when something calls them, e.g. Vercel Cron. Each route only skips
+if `notification_runs` already has a row for today/this week; delete that
+row to re-trigger a same-day send while testing.)
 
 ## Roles recap
 
